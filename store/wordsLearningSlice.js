@@ -1,66 +1,117 @@
-import { createSlice } from "@reduxjs/toolkit";
-import { createSelector } from "@reduxjs/toolkit";
+
+import { createSlice, createSelector } from "@reduxjs/toolkit";
 import { INITIAL_FORGETTING_SPAN } from "../constants";
+import * as dbUtils from "./dbUtils";
 
 const initialState = {
   words: [],
 };
 
 const wordsLearningSlice = createSlice({
-  name: "words",
-  initialState: initialState,
+  name: "wordsLearning",
+  initialState,
+
   reducers: {
     setInitial(state, action) {
-      state.words = action.payload;
+      state.words = Array.isArray(action.payload)
+        ? action.payload
+        : [];
     },
-    updateWordLearnInfo(state, action) {
-      const wordInfoToUpdate = state.words.find(
-        (wordInfo) => wordInfo.word === action.payload
-      );
-      const milisecondsNow = new Date().getTime();
-      wordInfoToUpdate.dateForgets = new Date(
-        milisecondsNow + wordInfoToUpdate.forgettingSpan
-      ).getTime();
-      wordInfoToUpdate.forgettingSpan *= 2;
-      wordInfoToUpdate.dateTotallyForgets = new Date(
-        milisecondsNow + wordInfoToUpdate.forgettingSpan
-      ).getTime();
-      wordInfoToUpdate.status = 2;
-    },
+
     addWord(state, action) {
-      if (state.words.find((el) => el.word === action.payload.word)) return;
-      const nowMiliseconds = new Date().getTime();
-      const wordData = { ...action.payload };
-      wordData.dateForgets = new Date(
-        nowMiliseconds - INITIAL_FORGETTING_SPAN
-      ).getTime();
-      wordData.dateTotallyForgets = nowMiliseconds;
-      wordData.forgettingSpan = INITIAL_FORGETTING_SPAN;
-      wordData.status = 0;
-      state.words.push(wordData);
-    },
-    updateWord(state, action) {
-      const wordIndexToUpdate = state.words.findIndex(
-        (wordInfo) => wordInfo.word === action.payload.word
+      const existingWord = state.words.find(
+        (item) => item.word === action.payload.word
       );
-      state.words[wordIndexToUpdate] = {
-        ...state.words[wordIndexToUpdate],
+
+      if (existingWord) {
+        return;
+      }
+
+      const now = Date.now();
+
+      const wordData = {
+        ...action.payload,
+        dateForgets: now - INITIAL_FORGETTING_SPAN,
+        dateTotallyForgets: now,
+        forgettingSpan: INITIAL_FORGETTING_SPAN,
+        status: 0,
+      };
+
+      state.words.push(wordData);
+
+      // Передаємо до SQLite звичайний об'єкт, не Immer-проксі.
+      dbUtils.addWord({ ...wordData });
+    },
+
+    updateWord(state, action) {
+      const index = state.words.findIndex(
+        (item) => item.word === action.payload.word
+      );
+
+      if (index === -1) {
+        return;
+      }
+
+      state.words[index] = {
+        ...state.words[index],
         ...action.payload,
       };
+
+      dbUtils.updateWord({ ...state.words[index] });
     },
+
     removeWord(state, action) {
-      state.words = state.words.filter((item) => item.word != action.payload);
+      const wordText = action.payload;
+
+      state.words = state.words.filter(
+        (item) => item.word !== wordText
+      );
+
+      dbUtils.deleteWord(wordText);
     },
+
+    updateWordLearnInfo(state, action) {
+      const wordInfo = state.words.find(
+        (item) => item.word === action.payload
+      );
+
+      if (!wordInfo) {
+        return;
+      }
+
+      const now = Date.now();
+
+      wordInfo.dateForgets = now + wordInfo.forgettingSpan;
+      wordInfo.forgettingSpan *= 2;
+      wordInfo.dateTotallyForgets =
+        now + wordInfo.forgettingSpan;
+      wordInfo.status = 2;
+
+      // Не передаємо проксі Immer в mock або SQLite.
+      dbUtils.updateWord({ ...wordInfo });
+    },
+
     updateStatuses(state) {
-      const milisecondsNow = new Date().getTime();
+      const now = Date.now();
+
       for (const wordInfo of state.words) {
-        if (wordInfo.dateTotallyForgets <= milisecondsNow) {
-          wordInfo.status = 0;
+        const previousStatus = wordInfo.status;
+        let nextStatus = previousStatus;
+
+        if (wordInfo.dateTotallyForgets <= now) {
+          nextStatus = 0;
         } else if (
-          wordInfo.dateForgets <= milisecondsNow &&
-          wordInfo.dateTotallyForgets > milisecondsNow
+          wordInfo.dateForgets <= now &&
+          wordInfo.dateTotallyForgets > now
         ) {
-          wordInfo.status = 1;
+          nextStatus = 1;
+        }
+
+        if (nextStatus !== previousStatus) {
+          wordInfo.status = nextStatus;
+
+          // Зберігаємо тільки ті записи, статус яких змінився.
+          dbUtils.updateWord({ ...wordInfo });
         }
       }
     },

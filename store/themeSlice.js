@@ -1,5 +1,7 @@
+
 import { createSlice } from "@reduxjs/toolkit";
 import { COLORS_DARK, COLORS_LIGHT } from "../constants";
+import * as dbUtils from "./dbUtils";
 
 const initialState = {
   isDark: true,
@@ -8,15 +10,19 @@ const initialState = {
 
 const themeSlice = createSlice({
   name: "theme",
-  initialState: initialState,
+  initialState,
+
   reducers: {
     setInitial(state, action) {
-      state.isDark = action.payload;
+      state.isDark = Boolean(action.payload);
       state.colors = state.isDark ? COLORS_DARK : COLORS_LIGHT;
     },
+
     toggle(state) {
       state.isDark = !state.isDark;
       state.colors = state.isDark ? COLORS_DARK : COLORS_LIGHT;
+
+      dbUtils.setTheme(state.isDark);
     },
   },
 });
